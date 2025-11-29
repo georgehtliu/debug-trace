@@ -55,11 +55,20 @@ async def create_trace(
     trace.updated_at = datetime.now().isoformat()
     db.commit()
     # 5. Return trace with QA results
-    # Convert QAResult model to schema
+    # Convert QAResult model to schema with enhanced fields
+    detailed_scores = json.loads(qa_result.detailed_scores) if qa_result.detailed_scores else None
+    strengths = json.loads(qa_result.strengths) if qa_result.strengths else None
+    weaknesses = json.loads(qa_result.weaknesses) if qa_result.weaknesses else None
+    recommendations = json.loads(qa_result.recommendations) if qa_result.recommendations else None
+    
     qa_result_schema = QAResultSchema(
         tests_passed=bool(qa_result.tests_passed),
         reasoning_score=qa_result.reasoning_score,
-        judge_comments=qa_result.judge_comments
+        judge_comments=qa_result.judge_comments,
+        detailed_scores=detailed_scores,
+        strengths=strengths,
+        weaknesses=weaknesses,
+        recommendations=recommendations
     )
     
     return TraceResponseSchema(
@@ -110,10 +119,19 @@ async def get_trace(
     qa_result_schema = None
     if qa_result:
         from app.schemas import QAResultSchema
+        detailed_scores = json.loads(qa_result.detailed_scores) if qa_result.detailed_scores else None
+        strengths = json.loads(qa_result.strengths) if qa_result.strengths else None
+        weaknesses = json.loads(qa_result.weaknesses) if qa_result.weaknesses else None
+        recommendations = json.loads(qa_result.recommendations) if qa_result.recommendations else None
+        
         qa_result_schema = QAResultSchema(
             tests_passed=bool(qa_result.tests_passed),
             reasoning_score=qa_result.reasoning_score,
-            judge_comments=qa_result.judge_comments
+            judge_comments=qa_result.judge_comments,
+            detailed_scores=detailed_scores,
+            strengths=strengths,
+            weaknesses=weaknesses,
+            recommendations=recommendations
         )
     # 4. Return combined response
     return TraceResponseSchema(
@@ -215,11 +233,20 @@ async def finalize_trace(
             "details": json.loads(event.details) if isinstance(event.details, str) else event.details
         })
     
-    # 5. Convert QAResult to schema
+    # 5. Convert QAResult to schema with enhanced fields
+    detailed_scores = json.loads(qa_result.detailed_scores) if qa_result.detailed_scores else None
+    strengths = json.loads(qa_result.strengths) if qa_result.strengths else None
+    weaknesses = json.loads(qa_result.weaknesses) if qa_result.weaknesses else None
+    recommendations = json.loads(qa_result.recommendations) if qa_result.recommendations else None
+    
     qa_result_schema = QAResultSchema(
         tests_passed=bool(qa_result.tests_passed),
         reasoning_score=qa_result.reasoning_score,
-        judge_comments=qa_result.judge_comments
+        judge_comments=qa_result.judge_comments,
+        detailed_scores=detailed_scores,
+        strengths=strengths,
+        weaknesses=weaknesses,
+        recommendations=recommendations
     )
     
     # 6. Return trace with QA results

@@ -33,10 +33,14 @@ class EventSchema(BaseModel):
 
 
 class QAResultSchema(BaseModel):
-    """Schema for QA results."""
+    """Schema for QA results with enhanced evaluation details."""
     tests_passed: bool
     reasoning_score: float = Field(..., ge=1.0, le=5.0, description="Score from 1.0 to 5.0")
     judge_comments: Optional[str] = None
+    detailed_scores: Optional[Dict[str, float]] = Field(None, description="Per-criterion scores (1.0-5.0)")
+    strengths: Optional[List[str]] = Field(None, description="List of identified strengths")
+    weaknesses: Optional[List[str]] = Field(None, description="List of identified weaknesses")
+    recommendations: Optional[List[str]] = Field(None, description="List of improvement recommendations")
 
 
 class TraceCreateSchema(BaseModel):

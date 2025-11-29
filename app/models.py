@@ -45,6 +45,11 @@ class QAResult(Base):
     judge_comments = Column(Text)
     test_output = Column(Text)  # Store test logs for debugging
     qa_timestamp = Column(String, nullable=False)  # ISO8601 timestamp
+    # Enhanced fields for detailed evaluation
+    detailed_scores = Column(Text)  # JSON string with per-criterion scores
+    strengths = Column(Text)  # JSON string array of strengths
+    weaknesses = Column(Text)  # JSON string array of weaknesses
+    recommendations = Column(Text)  # JSON string array of recommendations
 
     # Relationships
     trace = relationship("Trace", back_populates="qa_result")
