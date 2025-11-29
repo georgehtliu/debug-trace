@@ -168,8 +168,10 @@ Required variables:
 
 **One-command startup:**
 ```bash
-docker-compose up
+docker compose up
 ```
+
+Note: On modern Docker installations (especially Apple Silicon), use `docker compose` (with space) instead of `docker-compose` (with hyphen).
 
 The API will be available at `http://localhost:8000`
 
