@@ -1,74 +1,102 @@
 """Pytest configuration and shared fixtures."""
-import pytest
-from unittest.mock import AsyncMock, patch
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from app.main import app
-from app.database import Base, get_db
-# Import models to ensure they're registered with Base
-from app.models import Trace, Event, QAResult  # noqa: F401
-from app.models import QAResult as QAResultModel
+
+import os
+import tempfile
 from datetime import datetime
+from unittest.mock import patch
 
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine, inspect
+from sqlalchemy.orm import sessionmaker
 
-# Use in-memory SQLite for testing
-# Create a new engine for each test to ensure isolation
-@pytest.fixture(scope="function")
-def db_session():
-    """Create a fresh database for each test."""
-    # Create a new in-memory database for each test
-    test_engine = create_engine(
-        "sqlite:///:memory:", connect_args={"check_same_thread": False}
-    )
-    # Ensure models are imported and registered
-    from app.models import Trace, Event, QAResult  # noqa: F401
-    # Create all tables - must be done after models are imported
-    Base.metadata.create_all(bind=test_engine)
-    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_engine)
-    db = TestingSessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-        Base.metadata.drop_all(bind=test_engine)
-        test_engine.dispose()
+from app import database
+from app.database import Base, get_db
+from app.main import app
+from app.models import QAResult as QAResultModel
+from app.models import Trace, Event, QAResult  # noqa: F401
 
 
 @pytest.fixture(scope="function")
 def mock_qa_pipeline():
     """Mock QA pipeline to avoid Docker/LLM calls in tests."""
+
     async def mock_run_qa_pipeline(trace, db):
         """Return a mock QA result."""
+        existing = (
+            db.query(QAResultModel)
+            .filter(QAResultModel.trace_id == trace.trace_id)
+            .first()
+        )
+        if existing:
+            return existing
+
         qa_result = QAResultModel(
             trace_id=trace.trace_id,
-            tests_passed=1,  # True
+            tests_passed=1,
             reasoning_score=3.5,
             judge_comments="Mock QA result for testing",
             test_output="Mock test output",
-            qa_timestamp=datetime.now().isoformat()
+            qa_timestamp=datetime.now().isoformat(),
         )
         db.add(qa_result)
         db.commit()
         db.refresh(qa_result)
         return qa_result
-    
-    with patch('app.routers.traces.run_qa_pipeline', side_effect=mock_run_qa_pipeline):
+
+    with patch("app.routers.traces.run_qa_pipeline", side_effect=mock_run_qa_pipeline):
         yield
 
 
 @pytest.fixture(scope="function")
-def client(db_session, mock_qa_pipeline):
-    """Create a test client with database override and mocked QA pipeline."""
+def client(mock_qa_pipeline):
+    """Create a test client with isolated SQLite DB and mocked QA pipeline."""
+    temp_db = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
+    temp_db.close()
+    db_path = temp_db.name
+
+    test_engine = create_engine(
+        f"sqlite:///{db_path}", connect_args={"check_same_thread": False}
+    )
+    TestingSessionLocal = sessionmaker(
+        autocommit=False, autoflush=False, bind=test_engine
+    )
+
+    Base.metadata.drop_all(bind=test_engine)
+    Base.metadata.create_all(bind=test_engine)
+
+    tables = inspect(test_engine).get_table_names()
+    assert "traces" in tables
+    assert "events" in tables
+    assert "qa_results" in tables
+
+    original_engine = database.engine
+    original_session_local = database.SessionLocal
+
+    database.engine = test_engine
+    database.SessionLocal = TestingSessionLocal
+
     def override_get_db():
+        db = database.SessionLocal()
         try:
-            yield db_session
+            yield db
         finally:
-            pass
-    
-    app.dependency_overrides[get_db] = override_get_db
-    yield TestClient(app)
-    app.dependency_overrides.clear()
+            db.close()
+
+    with patch("app.database.init_db", lambda: None):
+        app.dependency_overrides[get_db] = override_get_db
+        try:
+            yield TestClient(app)
+        finally:
+            app.dependency_overrides.clear()
+            database.engine = original_engine
+            database.SessionLocal = original_session_local
+            Base.metadata.drop_all(bind=test_engine)
+            test_engine.dispose()
+            try:
+                os.unlink(db_path)
+            except FileNotFoundError:
+                pass
 
 
 @pytest.fixture
@@ -85,8 +113,8 @@ def sample_trace_data():
                 "details": {
                     "text": "I suspect the issue is in the event handler",
                     "reasoning_type": "hypothesis",
-                    "confidence": "high"
-                }
+                    "confidence": "high",
+                },
             },
             {
                 "type": "command",
@@ -94,8 +122,8 @@ def sample_trace_data():
                 "details": {
                     "command": "grep -r login-button src/",
                     "output": "src/components/Login.jsx:15",
-                    "working_directory": "/project"
-                }
+                    "working_directory": "/project",
+                },
             },
             {
                 "type": "edit",
@@ -103,8 +131,8 @@ def sample_trace_data():
                 "details": {
                     "file": "src/components/Login.jsx",
                     "change": "Added event listener",
-                    "diff": "@@ -15,6 +15,8 @@\n+document.getElementById(\"login-button\").addEventListener(\"click\", handleLogin);\n+"
-                }
-            }
-        ]
+                    "diff": '@@ -15,6 +15,8 @@\n+document.getElementById("login-button").addEventListener("click", handleLogin);\n+',
+                },
+            },
+        ],
     }

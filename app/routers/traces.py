@@ -96,10 +96,14 @@ async def get_trace(
     event_schemas = []
     for event in events:
         import json
+        try:
+            details = json.loads(event.details) if isinstance(event.details, str) else event.details
+        except:
+            details = event.details if not isinstance(event.details, str) else {"raw": event.details}
         event_schemas.append({
             "type": event.event_type,
             "timestamp": event.event_timestamp,
-            "details": json.loads(event.details) if isinstance(event.details, str) else event.details
+            "details": details
         })
     # 3. Load QA results if available
     qa_result = db.query(QAResult).filter(QAResult.trace_id == trace_id).first()
@@ -127,33 +131,47 @@ async def get_trace(
 @router.post("/{trace_id}/events", status_code=status.HTTP_201_CREATED)
 async def add_event(
     trace_id: str,
-    event: dict,  # TODO: Use proper schema
+    event_payload: dict,
     db: Session = Depends(get_db)
 ):
     """
     Add an event to an existing trace (incremental ingestion - bonus feature).
-    
-    This allows clients to continuously export events during a session
-    rather than uploading everything at the end.
     """
-    # 1. Verify trace exists
     trace = db.query(Trace).filter(Trace.trace_id == trace_id).first()
     if not trace:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Trace not found"
         )
-    # 2. Validate event schema
+
+    payload = event_payload or {}
+    event_type = payload.get("type")
+    event_timestamp = payload.get("timestamp")
+    details = payload.get("details")
+
+    if not event_type or not event_timestamp:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Event must include 'type' and 'timestamp'"
+        )
+
+    serialized_details = (
+        json.dumps(details)
+        if isinstance(details, (dict, list))
+        else (details or "")
+    )
+
     event = Event(
         trace_id=trace_id,
-        event_type=event.type,
-        event_timestamp=event.timestamp,
-        details=event.details
+        event_type=event_type,
+        event_timestamp=event_timestamp,
+        details=serialized_details
     )
     db.add(event)
+    trace.updated_at = datetime.now().isoformat()
     db.commit()
-    # 3. Create Event record
-    return {"message": "Event added successfully"}
+    db.refresh(event)
+    return {"message": "Event added successfully", "event_id": event.id}
 
 
 @router.post("/{trace_id}/finalize", response_model=TraceResponseSchema)

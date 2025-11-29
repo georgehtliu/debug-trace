@@ -129,6 +129,6 @@ class TestErrorHandling:
             "events": []
         }
         response = client.post("/api/traces", json=payload)
-        # Should either succeed (empty string allowed) or fail validation
-        assert response.status_code in [status.HTTP_201_CREATED, status.HTTP_422_UNPROCESSABLE_ENTITY]
+        # Empty string is allowed (no validation on non-empty)
+        assert response.status_code == status.HTTP_201_CREATED
 
