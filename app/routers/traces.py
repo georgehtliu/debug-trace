@@ -23,16 +23,44 @@ async def create_trace(
     This endpoint accepts a full trace with all events and triggers
     the QA pipeline synchronously.
     """
-    # TODO: Implement trace creation
     # 1. Generate trace_id (UUID)
+    trace_id = str(uuid.uuid4())
     # 2. Create Trace record
+    trace = Trace(
+        trace_id=trace_id,
+        developer_id=trace_data.developer_id,
+        repo_url=trace_data.repo_url,
+        bug_description=trace_data.bug_description,
+        status="pending",
+        created_at=datetime.now().isoformat(),
+        updated_at=datetime.now().isoformat()
+    )
     # 3. Create Event records
+    for event in trace_data.events:
+        event = Event(
+            trace_id=trace_id,
+            event_type=event.type,
+            event_timestamp=event.timestamp,
+            details=event.details
+        )
+        db.add(event)
+    db.commit()
     # 4. Trigger QA pipeline
+    qa_result = await run_qa_pipeline(trace, db)
+    trace.status = "completed"
+    trace.updated_at = datetime.now().isoformat()
+    db.commit()
     # 5. Return trace with QA results
-    
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Endpoint not yet implemented"
+    return TraceResponseSchema(
+        trace_id=trace_id,
+        developer_id=trace_data.developer_id,
+        repo_url=trace_data.repo_url,
+        bug_description=trace_data.bug_description,
+        status="completed",
+        created_at=trace.created_at,
+        updated_at=trace.updated_at,
+        events=trace_data.events,
+        qa_results=qa_result
     )
 
 
@@ -44,17 +72,34 @@ async def get_trace(
     """
     Retrieve a trace by ID, including all events and QA results.
     """
-    # TODO: Implement trace retrieval
     # 1. Query Trace by trace_id
+    trace = db.query(Trace).filter(Trace.trace_id == trace_id).first()
+    if not trace:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Trace not found"
+        )
     # 2. Load associated events
+    events = db.query(Event).filter(Event.trace_id == trace_id).all()
     # 3. Load QA results if available
+    qa_result = db.query(QAResult).filter(QAResult.trace_id == trace_id).first()
+    if not qa_result:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="QA results not found"
+        )
     # 4. Return combined response
-    
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Endpoint not yet implemented"
+    return TraceResponseSchema(
+        trace_id=trace_id,
+        developer_id=trace.developer_id,
+        repo_url=trace.repo_url,
+        bug_description=trace.bug_description,
+        status=trace.status,
+        created_at=trace.created_at,
+        updated_at=trace.updated_at,
+        events=events,
+        qa_results=qa_result
     )
-
 
 @router.post("/{trace_id}/events", status_code=status.HTTP_201_CREATED)
 async def add_event(
@@ -68,16 +113,24 @@ async def add_event(
     This allows clients to continuously export events during a session
     rather than uploading everything at the end.
     """
-    # TODO: Implement incremental event addition
     # 1. Verify trace exists
+    trace = db.query(Trace).filter(Trace.trace_id == trace_id).first()
+    if not trace:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Trace not found"
+        )
     # 2. Validate event schema
-    # 3. Create Event record
-    # 4. Return success
-    
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Endpoint not yet implemented (bonus feature)"
+    event = Event(
+        trace_id=trace_id,
+        event_type=event.type,
+        event_timestamp=event.timestamp,
+        details=event.details
     )
+    db.add(event)
+    db.commit()
+    # 3. Create Event record
+    return {"message": "Event added successfully"}
 
 
 @router.post("/{trace_id}/finalize", response_model=TraceResponseSchema)
@@ -91,14 +144,34 @@ async def finalize_trace(
     This is used when incremental ingestion is enabled - it signals
     that the trace is complete and ready for QA processing.
     """
-    # TODO: Implement trace finalization
     # 1. Verify trace exists and is in 'pending' status
+    trace = db.query(Trace).filter(Trace.trace_id == trace_id).first()
+    if not trace:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Trace not found"
+        )
+    if trace.status != "pending":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Trace is not in 'pending' status"
+        )
     # 2. Trigger QA pipeline
+    qa_result = await run_qa_pipeline(trace, db)
     # 3. Update trace status
+    trace.status = "completed"
+    trace.updated_at = datetime.now().isoformat()
+    db.commit()
     # 4. Return trace with QA results
-    
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Endpoint not yet implemented"
+    return TraceResponseSchema(
+        trace_id=trace_id,
+        developer_id=trace.developer_id,
+        repo_url=trace.repo_url,
+        bug_description=trace.bug_description,
+        status="completed",
+        created_at=trace.created_at,
+        updated_at=trace.updated_at,
+        events=trace.events,
+        qa_results=qa_result
     )
 
