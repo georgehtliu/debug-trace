@@ -3,11 +3,13 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
 import uuid
+import json
 from datetime import datetime
 
 from app.database import get_db
 from app.models import Trace, Event, QAResult
 from app.schemas import TraceCreateSchema, TraceResponseSchema
+from app.services.qa_pipeline import run_qa_pipeline
 
 router = APIRouter(prefix="/api/traces", tags=["traces"])
 
@@ -36,15 +38,17 @@ async def create_trace(
         updated_at=datetime.now().isoformat()
     )
     # 3. Create Event records
-    for event in trace_data.events:
+    db.add(trace)
+    for event_data in trace_data.events:
         event = Event(
             trace_id=trace_id,
-            event_type=event.type,
-            event_timestamp=event.timestamp,
-            details=event.details
+            event_type=event_data.type,
+            event_timestamp=event_data.timestamp,
+            details=json.dumps(event_data.details) if isinstance(event_data.details, dict) else str(event_data.details)
         )
         db.add(event)
     db.commit()
+    db.refresh(trace)
     # 4. Trigger QA pipeline
     qa_result = await run_qa_pipeline(trace, db)
     trace.status = "completed"
@@ -59,7 +63,7 @@ async def create_trace(
         status="completed",
         created_at=trace.created_at,
         updated_at=trace.updated_at,
-        events=trace_data.events,
+        events=[{"type": e.type, "timestamp": e.timestamp, "details": e.details} for e in trace_data.events],
         qa_results=qa_result
     )
 
@@ -81,12 +85,24 @@ async def get_trace(
         )
     # 2. Load associated events
     events = db.query(Event).filter(Event.trace_id == trace_id).all()
+    # Convert events to schema format
+    event_schemas = []
+    for event in events:
+        import json
+        event_schemas.append({
+            "type": event.event_type,
+            "timestamp": event.event_timestamp,
+            "details": json.loads(event.details) if isinstance(event.details, str) else event.details
+        })
     # 3. Load QA results if available
     qa_result = db.query(QAResult).filter(QAResult.trace_id == trace_id).first()
-    if not qa_result:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="QA results not found"
+    qa_result_schema = None
+    if qa_result:
+        from app.schemas import QAResultSchema
+        qa_result_schema = QAResultSchema(
+            tests_passed=bool(qa_result.tests_passed),
+            reasoning_score=qa_result.reasoning_score,
+            judge_comments=qa_result.judge_comments
         )
     # 4. Return combined response
     return TraceResponseSchema(
@@ -97,8 +113,8 @@ async def get_trace(
         status=trace.status,
         created_at=trace.created_at,
         updated_at=trace.updated_at,
-        events=events,
-        qa_results=qa_result
+        events=event_schemas,
+        qa_results=qa_result_schema
     )
 
 @router.post("/{trace_id}/events", status_code=status.HTTP_201_CREATED)
