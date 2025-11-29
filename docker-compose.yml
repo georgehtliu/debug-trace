@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=sqlite:///./traces.db
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - HOST=0.0.0.0
+      - PORT=8000
+    volumes:
+      - ./traces.db:/app/traces.db
+      - /var/run/docker.sock:/var/run/docker.sock  # For Docker-in-Docker
+    restart: unless-stopped
+
