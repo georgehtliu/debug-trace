@@ -8,7 +8,7 @@ from datetime import datetime
 
 from app.database import get_db
 from app.models import Trace, Event, QAResult
-from app.schemas import TraceCreateSchema, TraceResponseSchema
+from app.schemas import TraceCreateSchema, TraceResponseSchema, QAResultSchema
 from app.services.qa_pipeline import run_qa_pipeline
 
 router = APIRouter(prefix="/api/traces", tags=["traces"])
@@ -55,6 +55,13 @@ async def create_trace(
     trace.updated_at = datetime.now().isoformat()
     db.commit()
     # 5. Return trace with QA results
+    # Convert QAResult model to schema
+    qa_result_schema = QAResultSchema(
+        tests_passed=bool(qa_result.tests_passed),
+        reasoning_score=qa_result.reasoning_score,
+        judge_comments=qa_result.judge_comments
+    )
+    
     return TraceResponseSchema(
         trace_id=trace_id,
         developer_id=trace_data.developer_id,
@@ -64,7 +71,7 @@ async def create_trace(
         created_at=trace.created_at,
         updated_at=trace.updated_at,
         events=[{"type": e.type, "timestamp": e.timestamp, "details": e.details} for e in trace_data.events],
-        qa_results=qa_result
+        qa_results=qa_result_schema
     )
 
 
@@ -178,7 +185,26 @@ async def finalize_trace(
     trace.status = "completed"
     trace.updated_at = datetime.now().isoformat()
     db.commit()
-    # 4. Return trace with QA results
+    db.refresh(trace)
+    
+    # 4. Load events and convert to schema format
+    events = db.query(Event).filter(Event.trace_id == trace_id).all()
+    event_schemas = []
+    for event in events:
+        event_schemas.append({
+            "type": event.event_type,
+            "timestamp": event.event_timestamp,
+            "details": json.loads(event.details) if isinstance(event.details, str) else event.details
+        })
+    
+    # 5. Convert QAResult to schema
+    qa_result_schema = QAResultSchema(
+        tests_passed=bool(qa_result.tests_passed),
+        reasoning_score=qa_result.reasoning_score,
+        judge_comments=qa_result.judge_comments
+    )
+    
+    # 6. Return trace with QA results
     return TraceResponseSchema(
         trace_id=trace_id,
         developer_id=trace.developer_id,
@@ -187,7 +213,7 @@ async def finalize_trace(
         status="completed",
         created_at=trace.created_at,
         updated_at=trace.updated_at,
-        events=trace.events,
-        qa_results=qa_result
+        events=event_schemas,
+        qa_results=qa_result_schema
     )
 
